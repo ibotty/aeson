@@ -51,9 +51,10 @@ module Data.Aeson.Types.Class
     ) where
 
 import Control.Applicative ((<$>), (<*>), (<|>), pure, empty)
+import Control.Monad.Identity (Identity(runIdentity))
 import Data.Aeson.Functions
 import Data.Aeson.Types.Internal
-import Data.Attoparsec.Char8 (Number(..))
+import Data.Attoparsec.Char8 (IResult(Done), Number(..))
 import Data.Fixed
 import Data.Hashable (Hashable(..))
 import Data.Int (Int8, Int16, Int32, Int64)
@@ -70,7 +71,9 @@ import Data.Vector (Vector)
 import Data.Word (Word, Word8, Word16, Word32, Word64)
 import Foreign.Storable (Storable)
 import System.Locale (defaultTimeLocale, dateTimeFmt)
+import qualified Data.Attoparsec.Char8 as AP
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as LB
 import qualified Data.HashMap.Strict as H
 import qualified Data.HashSet as HashSet
@@ -345,25 +348,30 @@ instance FromJSON Float where
     {-# INLINE parseJSON #-}
 
 instance ToJSON (Ratio Integer) where
-    toJSON = Number . fromRational
+    toJSON = String . T.pack . show
     {-# INLINE toJSON #-}
 
 instance FromJSON (Ratio Integer) where
-    parseJSON = withNumber "Ration Integer" $ \n ->
-                  pure $ case n of
-                           D d -> toRational d
-                           I i -> fromIntegral i
+    parseJSON = parseFractional
     {-# INLINE parseJSON #-}
 
+parseFractional :: Fractional a => Value -> Parser a
+parseFractional = withText "Fractional Number" $
+                      \v -> case attoParseText AP.rational v of
+                             (Done "" a) -> pure a
+                             _           -> fail $ "Bad fractional number " ++ unpack v
+{-# INLINE parseFractional #-}
+
+attoParseText :: AP.Parser a -> Text -> AP.Result a
+attoParseText p = runIdentity . AP.parseWith (return B.empty) p . B8.pack . unpack
+{-# INLINE attoParseText #-}
+
 instance HasResolution a => ToJSON (Fixed a) where
-    toJSON = Number . realToFrac
+    toJSON = String . T.pack . showFixed True
     {-# INLINE toJSON #-}
 
 instance HasResolution a => FromJSON (Fixed a) where
-    parseJSON (Number n) = pure $ case n of
-                                    D d -> realToFrac d
-                                    I i -> fromIntegral i
-    parseJSON v          = typeMismatch "Fixed" v
+    parseJSON = parseFractional
     {-# INLINE parseJSON #-}
 
 instance ToJSON Int where
